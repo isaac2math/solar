@@ -1,5 +1,7 @@
 # Subsample-ordered least-angle regression: a much more stablized and accurate variable selection algorithm.
 
+# Author : Ning Xu
+
 ## This file includes the current, stable version of the 'solarpy' package and the simulation results for solar vs CV-lars-lasso and CV-cd.
 
 ## 1. Solarpy and plotting scripts
@@ -80,7 +82,7 @@
   * This package depends on Python packages "simul_plot_ic.py" and "Pickle".
 
 
-### .html files (in Supplementary file C) report all the raw graphical/numerical results of simuations.
+### .html files report all the raw graphical/numerical results of simuations.
 
 ## 2. How "solarpy" works
 
