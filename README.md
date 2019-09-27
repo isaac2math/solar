@@ -1,4 +1,4 @@
-# Subsample-ordered least-angle regression: a much more stablized and accurate variable selection algorithm.
+# Subsample-ordered least-angle regression (solar): a much more stablized and accurate variable selection algorithm.
 
 # Author : Ning Xu
 
