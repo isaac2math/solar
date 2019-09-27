@@ -82,7 +82,7 @@
   * This package depends on Python packages "simul_plot_ic.py" and "Pickle".
 
 
-### .html files report all the raw graphical/numerical results of simuations.
+### "Supp_B_Python_package.zip" files report all the raw graphical/numerical results of simuations in HTML files. You can download and view it.
 
 ## 2. How "solarpy" works
 
