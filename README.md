@@ -1,6 +1,6 @@
-# This zip file includes the current, stable version of the 'solarpy' package and the simulation results for solar vs CV-lars-lasso and CV-cd in Sections 3 and 4.
+# Subsample-ordered least-angle regression: a much more stablized and accurate variable selection algorithm.
 
-## For updates and improvements, please follow https://github.com/isaac2math
+## This file includes the current, stable version of the 'solarpy' package and the simulation results for solar vs CV-lars-lasso and CV-cd.
 
 ## 1. Solarpy and plotting scripts
 ## A detailed manual with comments and explanations is available in the '.py' and '.ipynb' files as follows:
