@@ -3,6 +3,7 @@
 # Author : Ning Xu
 
 ## This file includes the current, stable version of the 'solarpy' package and the simulation results for solar vs CV-lars-lasso and CV-cd.
+## A demonstration slides can be found under the namer "demo_slides.pdf"
 
 ## 1. Solarpy and plotting scripts
 ## A detailed manual with comments and explanations is available in the '.py' and '.ipynb' files as follows:
