@@ -1,8 +1,21 @@
 # Subsample-ordered least-angle regression (solar): a much more stablized and accurate variable selection algorithm.
+> A new regularziation algorithm for stagewise learning with $L_p$ shrinkage. 
 
-# Author : Ning Xu
+## Author : Ning Xu
 
-## This file includes the current, stable version of the 'solarpy' package and the simulation results for solar vs CV-lars-lasso and CV-cd.
+-----------
+## Updates in next version (v1.1)
+- **I migrate the package to CUDA and OpenCL framework for GPU parallel computation.**
+- **I introduce R and Matlab packages (internally fortran and C++)**
+- **I apply subsample ordering to elastic net, adaptive lasso and graphical lasso**
+- **I applied subsample ordering regularization to one of my deep learning framework, see https://github.com/echushe/DeepFrame for detail.**
+------------
+
+## About current version (v1.0)
+## Subsample ordered least angel regression is a novel machine learning package for ultrahigh dimensional supervised learning, which substantially improve the sparsity and predition accuracy of lasso-type estimators in ultrahigh dimensional spaces without increasing computational load
+
+---
+## This version includes the current, stable version of the 'solarpy' package and the simulation results for solar vs CV-lars-lasso and CV-cd.
 ## A demonstration slides can be found under the namer "demo_slides.pdf"
 
 ## 1. Solarpy and plotting scripts
