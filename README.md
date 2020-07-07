@@ -5,6 +5,7 @@
 
 -----------
 ## Updates in next version (v1.1)
+- **I merged subsample ordering into another deep learning package of mine, called  *DeepFrame* https://github.com/echushe/DeepFrame.**
 - **I migrate the package to CUDA and OpenCL framework for GPU parallel computation.**
 - **I introduce R and Matlab packages (internally fortran and C++)**
 - **I apply subsample ordering to elastic net, adaptive lasso and graphical lasso**
