@@ -1,5 +1,5 @@
 # Subsample-ordered least-angle regression (solar): a much more stablized and accurate variable selection algorithm.
-> A new regularziation algorithm for stagewise learning with ![formula](https://render.githubusercontent.com/render/math?math=L_p) shrinkage. 
+> A new regularziation algorithm for stagewise learning
 
 ## Author : Ning Xu
 ## In this file I only included the demo slides presented at Machine learning conference. For detailed of subsample ordered least angle regression, please see the paper *"Solar: a least-angle regression for accurate and stable variable selection in high-dimensional data"* by Ning Xu ().
