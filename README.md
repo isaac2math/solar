@@ -2,7 +2,7 @@
 > A new regularziation algorithm for stagewise learning
 
 ## Author : Ning Xu
-## In this file I only included the demo slides presented at Machine learning conference. For detailed of subsample ordered least angle regression, please see the paper *"Solar: a least-angle regression for accurate and stable variable selection in high-dimensional data"* by Ning Xu ().
+## In this file I only included the demo slides presented at Machine learning conference. For detailed of subsample ordered least angle regression, please see the paper *"Solar: a least-angle regression for accurate and stable variable selection in high-dimensional data"* by Ning Xu (https://arxiv.org/abs/2007.15707).
 
 -----------
 ## Updates in next version (v1.1)
