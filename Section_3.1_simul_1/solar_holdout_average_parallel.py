@@ -1,0 +1,385 @@
+import numpy           as np
+import statsmodels.api as sm
+import pandas          as pd
+
+import time
+import warnings
+
+from joblib               import Parallel, delayed
+from sklearn.linear_model import Lars, LinearRegression, LassoLarsCV, LassoCV
+from costcom              import costs_com
+from sklearn.exceptions   import ConvergenceWarning
+
+# For recent version of Scikit-learn: since the class 'Lars' may rely on the Cholesky decomposition and hence may have potential convergence warning in high dimensional data (p is much larger than n), we input the following commmand to skip the convergence warning.
+# If possible, we recommend replace the Cholesky decomposition with incomplete Cholesky decomposition and run it on GPU.
+warnings.filterwarnings("ignore", category=ConvergenceWarning, module="sklearn")
+################################################################
+# the class of solar (under customized Joblib parallel scheme) #
+################################################################
+
+'''
+this class is used to demonstrate the performance comparison among solar (under customized Joblib parallel scheme), cv-lars-lasso and cv-cd.
+
+please note that this file is identical to "solar.py" except the average solution path estimation (step 2, line 99 - 147 of this file), where we use rewrite a sequential for-loop into a customized Joblib parallel scheme.
+
+Check this before you run the code:
+Plz check if you have 'joblib', 'sci-kit learn', 'numpy', 'matplotlib' and 'tqdm' installed. If not,
+    1. run 'pip install joblib scikit-learn numpy matplotlib tqdm' if you use pure Python3
+    2. run 'conda install joblib scikit-learn numpy matplotlib tqdm' if you use Anaconda3
+
+Modules:
+    1. from scikit-learn, we call 'LassoLarsCV' and 'LassoCV' for cv-lars-lasso and cv-cd respectively;
+    2. from scikit-learn, we call 'Lars' to compute solar.
+    3. we use 'numpy' for matrix computation and random variable generation;
+    4. for simulator and costcom, plz see 'simulator.py' and 'costcom.py' for detail;
+    5. we use class 'time' to time the computation of solar
+
+Inputs:
+    1. X and y   : the inputs and output of regression
+    2. n_repeat  : the number of subsamples in solar
+    3. step_size : step size to tune the value of c for solar;
+    4. rnd_seed  : the random seed for reproduction
+    5. lasso     : 'lasso = False' will only return the solar result
+
+Outputs:
+    1. solar_coef   : the solar regression coefficients (defined at the end of Algorithm 2);
+    2. opt_c        : value of c* in solar;
+    3. test_error   : the list of test errors for tuning the value of c;
+    4. Qc_list      : the nest sets of Q(c), for all value of c from 1 to 0;
+    5. la_list      : number of variables selected by CV-lars-lasso;
+    6. la_vari_list : the indices of variables selected by CV-lars-lasso;
+    7. cd_list      : number of variables selected by CV-cd;
+    8. cd_vari_list : the indices of variables selected by CV-cd;
+
+Remarks:
+    1. fit    : the function that trains solar;
+    2. q_list : the plot function that returns the list of all Q(c) in solar;
+'''
+
+class solar:
+
+    def __init__(self, X, Y, n_repeat, step_size, rnd=0, lasso=False):
+        # for convinience, we define the common variable (variables we need to use for each of the following functions) in the class as follows (the common variable is defined as self.xxxx)
+
+        # sample size
+        self.sample_size = X.shape[0]
+        # the number of subsamples generated in solar (10 in paper)
+        self.n_repeat = n_repeat
+        # (grid search) step size for tuning the value of c for solar
+        self.step_size = step_size
+        # the size of the data reserved for average soluation path estimation (Algorithm 1)
+        self.train_size = int(self.sample_size * 0.8)
+        # the size of each subsample for average soluation path estimation (Algorithm 1)
+        self.subsample_size = int(self.train_size * 0.9)
+        # the number of total variables in X
+        self.n_dim = X.shape[1]
+        # the random seed for replication
+        self.rnd = rnd
+        # if lasso = true, this package will compute cv-lars-lasso and cv-cd alongside with solar for comparison.
+        self.lasso = lasso
+        # the maximum value of c in its grid search (for plotting)
+        self.q_start = 1
+        # the minimum value of c in its grid search (for plotting)
+        self.q_end = 0.1
+        # step size of c in its grid search (for plotting)
+        self.q_step = -0.02
+        # the observations of X in test set
+        self.X_test = X[int(-1 * self.sample_size * 0.2):, :]
+        # the observations of Y in test set
+        self.y_test = Y[int(-1 * self.sample_size * 0.2):, :]
+        # the observations of X for average soluation path estimation
+        self.X_so = X[:int(-1 * self.sample_size * 0.2), :]
+        # the observations of Y for average soluation path estimation
+        self.y_so = Y[:int(-1 * self.sample_size * 0.2), :]
+        # the sample we generate via data-generating process
+        self.X = X; self.y = Y
+
+    def fit(self):
+
+        # 1. construct a placeholder called 'qhat_k_container' for the list of all q_hat^k (defined in Algorithm 1) of each subsample
+        qhat_k_container = list()
+
+        # 2. estimate q_hat^k (for the solution path) on each subsample and save them as elements of the placeholder
+
+        #parallel computing starts
+        #to make parallel computing replicable, set random seeds
+        np.random.seed(self.rnd)
+        # Spawn off 10 child SeedSequences to pass to child processes.
+        seeds = np.random.randint(1e8, size=self.n_repeat)
+
+        #first we define what we do in each stage of the loop
+        def loop_fun(self, i, seeds, qhat_k_container):
+
+            np.random.seed(seeds[i])
+
+            # 2a. randomly choose a subset of sample points (whose index is 'index_subsample') that is used to generate a subsample in each repeat
+            index_subsample = np.random.choice(self.train_size, self.subsample_size, replace=False)
+            # 2b. based on 'index_subsample', take the corresponding observations of X out and save them as the subample
+            X_subsample = self.X_so[index_subsample]
+            # 2c. based on 'index_subsample', take the corresponding observations of Y out and save them as the subample
+            y_subsample = self.y_so[index_subsample]
+
+            # 2d. scikit-learn requires 'y_subsample' to be an one-dimension array
+            y_subsample.shape = (y_subsample.shape[0],)
+
+            # 2e. given a subsample, compute q_hat^k (the solution path) using least-angle regression
+
+            # 2e(1). call the class 'Lars'
+            trial_1 = Lars(n_nonzero_coefs=min(X_subsample.shape[1] + 1, X_subsample.shape[0] + 1))
+            # 2e(2). fit lars on the subsample
+            trial_1.fit(X_subsample, y_subsample)
+            # 2e(3). save the active set of lars (indices of variables select by lars) as 'active'.
+            active = trial_1.active_
+
+            # 2f. The active set of lars is ranked based on the chronology of variable inclusion at different stages of lars. For example [2,1,3] means x_2 is included at stage 1, x_1 is included at stage 2 and x_3 is included at stage 3. Based on the active set of lars, we compute q_hat^k (defined as 'qhat_k' in code) as defined in Algorithm 2
+
+            # 2f(1). we generate 'qhat_k' as an array of zeros;
+            qhat_k = np.zeros((1, self.n_dim))
+            # 2f(2). we compute the i-th value of q_hat^k for the corresponding variable based on Algorithm 2; replace i-th term in 'qhat_k' with the value we just compute
+            for i in active:
+
+                qhat_k[0, i] = 1 - \
+                    (np.where(np.array(active) == i)[0][0]) / (self.n_dim)
+
+            # 2f(3). we append the result into 'qhat_k_container' as one element of the list
+            qhat_k_container.append(qhat_k)
+
+            return qhat_k_container
+
+        #parallel the for-loop
+        qhat_k_container = Parallel(n_jobs=-1, prefer="processes")(delayed(loop_fun)(self, i, seeds, qhat_k_container) for i in range(self.n_repeat))
+
+        # 3. if self.lasso == True, we compute CV-lars-lasso and CV-cd on the original sample X and Y (not on the subsample)
+        if (self.lasso == True):
+
+            # a(1). call the class for CV-lars-lasso (called LassoLarsCV in Scikit-learn)
+            # a(2). we set the number of folds in CV as 10
+            trial_2 = LassoLarsCV(cv=10)
+            # b. change y into one-dimensional array (required by Scikit-learn)
+            yy = self.y
+            yy.shape = (self.sample_size,)
+            # c.  fit CV-lars-lasso on X and Y
+            trial_2.fit(self.X, yy)
+
+            # d. save 'la_list' as the number of variables in the active set of CV-lars-lasso
+            la_list = len(trial_2.active_)
+            # e. save 'la_vari_list' as the active set of CV-lars-lasso
+            la_vari_list = trial_2.active_
+
+            # f. call the class for CV-cd (called LassoCV in Scikit-learn)
+            # f(1). we set the number of folds in CV as 10
+            # f(2). for reproduction, we fix the random seed of training-validation split in CV (random_state=0)
+            trial_3 = LassoCV(cv=10, random_state=0)
+
+            # g.  fit cv-cd on X and Y
+            trial_3.fit(self.X, yy)
+
+            # h. save 'cd_list' as the number of variables in the active set of CV-cd
+            cd_list = np.count_nonzero(trial_3.coef_)
+            # i. save 'cd_vari_list' as the active set of CV-cd
+            cd_vari_list = np.nonzero(trial_3.coef_)[0]
+
+        # 4. compute q_hat and Q(c) (defined in Algorithm 2)
+        # a(1). we transform the list of all q_hat^k ('qhat_k_container') into a matrix ('qhat_k_container_matrix')
+        # a(2). row of the matrix: the q_hat^k on a given subsample for all variables
+        # a(3). colum of the matrix: the corresponding value of q_hat^k for a given variable on all subsamples
+        qhat_k_container_matrix = np.concatenate(qhat_k_container, axis=0)
+        # b.  compute the the value of qhat for each variable (qhat defined in Algorithm 2 of the paper)
+        qhat_value = np.mean(qhat_k_container_matrix, axis=0)
+
+        # c. set 'Qc_list' as the container of Q(c) for all value of c
+        Qc_list = list()
+        # d. set 'c_seq' as the sequence of c for the grid search of c* in solar
+        c_seq = np.arange(np.max(qhat_value), 0.1, self.step_size)
+
+        # e. generate Q(c) for each value of c
+        for j in c_seq:
+            # e(1). define 'container' as the placeholder of Q(c) when c == j;
+            container = list()
+
+            for i in range(self.X.shape[1]):
+                # e(2). include all variables into 'container' if their corresponding values in q-hat are larger or equal to j;
+                if (qhat_value[0][i] >= j):
+
+                    container.append(i)
+            # e(3). append 'container' (Q(c) when c == j) into 'Qc_list' (the container of Q(c) for all value of c);
+            Qc_list.append(container)
+
+        # 5. compute the test error of each value of c
+        # we use grid search on test set to choose c*;
+        # for each value of c in the grid search, train a OLS of Y_so on the variables of Q(c) in X_so (Y_so and X_so defined at the begining);
+
+        # a. container for test errors
+        # b. compute the test error of each Q(c) on test set
+        # b(0). set i as the indices of all variables in Q(c) for a given value of c;
+
+        #parallel computing starts
+        #first we define what we do in each stage of the loop
+        def loop_fun_1(self, i):
+
+            # b(1). call the LinearRegression class;
+            OLS_1 = LinearRegression()
+            # b(2). compute OLS of Y_so on the variables in Q(c) in X_so;
+            OLS_1.fit(self.X_so[:, i], self.y_so)
+            # b(3). compute the L2 prediction error of OLS on test set (X_test, y_test);
+            s1 = costs_com(self.X_test[:, i], self.y_test, OLS_1)
+            loss_test_1, _ = s1.L2()
+
+            return loss_test_1
+
+        #parallel the for-loop
+        test_error = Parallel(n_jobs=-1, prefer="processes")(delayed(loop_fun_1)(self, i) for i in Qc_list)
+
+        # 6. tuning c via grid search
+        # 6(a). transform 'test_error' from a list into an array;
+        test_error = np.asarray(test_error)
+        # 6(b). save the location of minimum of 'test_error' as 'min_loc_val';
+        min_loc_val = np.where(test_error == min(test_error))[0]
+        # 6(c). save the correpsonding value of c (c*) as 'opt_c';
+        opt_c = c_seq[min_loc_val]
+        # 6(d). find Q(c*) and save it as 'Q_opt_c';
+        Q_opt_c = Qc_list[max(min_loc_val)]
+
+        # 7. Regression of Y onto the selected variables ( Q(c*) ) in X
+        # 7(a). call the LinearRegression class;
+        OLS_2 = LinearRegression()
+        # 7(b). fit OLS of Y on the variables of Q(c*) in X;
+        OLS_2.fit(self.X[:, Qc_list[max(min_loc_val)]], self.y)
+        # 7(c). set 'solar_coef' (an array of zeros) as the placeholder of solar regression coefficents
+        solar_coef = np.zeros([self.n_dim, 1])
+        # 7(d). put the estimated regression coefficents into their corresponding place of 'solar_coef'
+        solar_coef[Q_opt_c, 0] = OLS_2.coef_
+
+        # 8. define la_list, la_vari_list as empty list if self.lasso != True (if we don't want to compute cv-lars-lasso and cv-cd)
+        if (self.lasso != True):
+
+            la_list      = []
+            la_vari_list = []
+            cd_list      = []
+            cd_vari_list = []
+
+        # 9. compute hold-out average
+        # 9(a). bisect your data and set them as dataframe tables
+        X_half_1 = self.X[0:round(self.X.shape[0]/2),Q_opt_c]
+        Y_half_1 = self.y[0:round(self.y.shape[0]/2),:]
+        X_half_2 = self.X[round(self.X.shape[0]/2):,Q_opt_c]
+        Y_half_2 = self.y[round(self.y.shape[0]/2):,:]
+
+        var_name = ['X' + str(i) for i in Q_opt_c]
+
+        X_half_1 = pd.DataFrame(X_half_1, columns=var_name)
+        Y_half_1 = pd.DataFrame(Y_half_1, columns=['Y'])
+        X_half_2 = pd.DataFrame(X_half_2, columns=var_name)
+        Y_half_2 = pd.DataFrame(Y_half_2, columns=['Y'])
+
+        # 9(b). computation on first and second halves
+        X_half_1   = sm.add_constant(X_half_1)
+        X_half_2   = sm.add_constant(X_half_2)
+        reg_half_1 = sm.OLS(Y_half_1, X_half_1)
+        reg_half_2 = sm.OLS(Y_half_2, X_half_2)
+        result_half_1 = reg_half_1.fit()
+        result_half_2 = reg_half_2.fit()
+
+        # 9(c).  compute hold-out average and screen selected data by hold-out average p-value
+
+        X_t = list(); X_p = list(); hold_out_active_set = list()
+
+        for i in np.arange(1,len(Q_opt_c)+1):
+            # we plus 1 here because the statmodel regression report intercept at 0 (the first)
+
+            #hold-out average t-value
+            X_t.append((result_half_1.tvalues[i] + result_half_2.tvalues[i])/2)
+
+            #hold-out average p-value
+            X_p.append((result_half_1.pvalues[i] + result_half_2.pvalues[i])/2)
+
+            if ((result_half_1.pvalues[i] + result_half_2.pvalues[i])/2 <=0.05) :
+
+                hold_out_active_set.append(Q_opt_c[i-1])
+                # we minus 1 back
+        
+        return Q_opt_c, hold_out_active_set, la_list, la_vari_list, cd_list, cd_vari_list
+
+    # return the full list of subsample selection frequency for each variable in bsolar
+    def q_list(self, Qc_list):
+
+        # 1. concatenate Qc_list into a matrix
+        var_mark_plot = np.concatenate(Qc_list)
+        # 2. compute the value of c for each Q(c) and the corresponding variables in each Q(c)
+        var_index, counts = np.unique(var_mark_plot, return_counts=True)
+
+        var_index_ordered = [x for _, x in sorted(zip(counts, var_index))]
+
+        var_plot = var_index_ordered[::-1]
+
+        cou_plot = np.sort(counts)[::-1] / \
+            ((self.q_end - self.q_start) / self.q_step)
+
+        var_plot = ['X' + str(i) for i in var_plot]
+
+        # 3. print the list of variables with different value of c
+
+        var_loc_list = list()
+        var_q_list = list()
+
+        q_value_list = np.unique(cou_plot)[::-1]
+
+        i = 1
+
+        for j in q_value_list:
+
+            ans_ind = np.where([cou_plot == j])[1]
+            ans_var = [var_plot[i] for i in ans_ind]
+
+            var_loc_list.append(ans_ind)
+            var_q_list.append(ans_var)
+
+            print('q_hat value >= ', j)
+            print(var_q_list[:i])
+
+            i += 1
+
+##################################
+# test if this module works fine #
+##################################
+
+'''
+this part is set up to test the functionability of the class above;
+you can run all the codes in this file to test if the class works;
+when you call the class from this file, the codes (even functions or classes) after " if __name__ == '__main__': " will be ingored
+'''
+
+if __name__ == '__main__':
+
+    from simulator import simul
+
+    sample_size = 100
+    n_dim       = 12
+    n_info      = 5
+    n_repeat    = 10
+    step_size   = -0.02
+
+    np.random.seed(0)
+
+    # generate X and Y
+    trial1 = simul(sample_size, n_dim, n_info)
+    X, Y = trial1.data_gen()
+
+    # start timing
+    start = time.time()
+
+    # train solar
+    trial2 = solar(X, Y, n_repeat, step_size, rnd=0)
+
+    Q_opt_c, hold_out_active_set, la_list, la_vari_list, cd_list, cd_vari_list = trial2.fit()
+
+    # end timing
+    end = time.time()
+
+    # print the result
+    print('variables that solar selects: ', Q_opt_c)
+    print('variables that hold-out average selects: ', hold_out_active_set)
+    print('number of variables that solar selects: ', len(Q_opt_c))
+    print('number of variables that hold-out average selects: ', len(hold_out_active_set))
+
+    
